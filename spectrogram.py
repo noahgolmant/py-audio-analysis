@@ -1,7 +1,8 @@
 from whole_fft import plot_time_amplitude, plot_frequency_content
-from short_fft import plot_stft
+from fft import create_fft, plot_stft
 import matplotlib as mpl
 from pydub import AudioSegment
+import argparse
 
 """ convert mp3 to wav """
 def get_wav(filename):
@@ -23,7 +24,8 @@ def choose_fft(filename, choice):
     elif choice == '1':
         plot_frequency_content(filename)
     elif choice == '2':
-        plot_stft(filename)
+        fft = create_fft(filename)
+        plot_stft(fft)
 
 def main():
     print("---------------------------")
@@ -39,4 +41,9 @@ def main():
 
 if __name__ == '__main__':
     mpl.rcParams['agg.path.chunksize'] = 100000 
-    main()
+    parser = argparse.ArgumentParser(description='Display spectrogram of audio file.')
+    parser.add_argument('filename', metavar='f', type=str, help='audio file')
+    args = parser.parse_args()
+
+    filename = args.filename
+    choose_fft(filename, '2')
