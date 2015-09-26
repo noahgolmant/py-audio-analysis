@@ -71,26 +71,53 @@ class FFT:
         return self.__processed
 
 
-""" short time fourier transform of audio signal """
-def _stft(sig, frameSize, overlapFac=0.5, window=np.hanning):
-    win = window(frameSize)
-    hopSize = int(frameSize - np.floor(overlapFac * frameSize))
+def _stft(signal, frame_size, overlap_fac=0.5, window=np.hanning):
+    """ short-time fourier transform of an audio signal
+    -------------
+    DESCRIPTION:
+    Output is a matrix where each row represents a frame of time length frame_size
+    and each column entry is the loudness of the frequency specified by the column index.
+    ------------
+    INPUT:
+    signal: amplitude v time raw data of the audio stream
+    frame_size: size in samples of each frame to which it applies the FFT
+    overlap_fac: overlap between frames when applying windowing function
+    window: windowing function to reduce signal leakage in source audio stream
+    """
+    win = window(frame_size)
+    # number of samples to shift by for each application of the windowing function
+    hop_size = int(frame_size - np.floor(overlap_fac * frame_size))
     
     # zeros at beginning (thus center of 1st window should be for sample nr. 0)
-    samples = np.append(np.zeros(np.floor(frameSize/2.0)), sig)    
-    # cols for windowing
-    cols = np.ceil( (len(samples) - frameSize) / float(hopSize)) + 1
+    samples = np.append(np.zeros(np.floor(frame_size/2.0)), signal)    
+    # columns in signal v time matrix that we apply the windowing to
+    cols = np.ceil( (len(samples) - frame_size) / float(hop_size)) + 1
     # zeros at end (thus samples can be fully covered by frames)
-    samples = np.append(samples, np.zeros(frameSize))
-    
-    frames = stride_tricks.as_strided(samples, shape=(cols, frameSize), strides=(samples.strides[0]*hopSize, samples.strides[0])).copy()
+    samples = np.append(samples, np.zeros(frame_size))
+    # apply byte-ordered indexing scheme to sample array
+    # creates cols x frame_size frames of samples
+    frames = stride_tricks.as_strided(samples, shape=(cols, frame_size), strides=(samples.strides[0]*hop_size, samples.strides[0])).copy()
     frames *= win
-    
+    # apply real FFT to each frame
     return np.fft.rfft(frames)    
     
-""" scale frequency axis logarithmically """
-def _logscale_spec(spec, sr=44100, factor=20.):
-    timebins, freqbins = np.shape(spec)
+def _logscale_spec(fft_out, sr=44100, factor=20.):
+    """ scale frequency axis logarithmically
+    ------------
+    DESCRIPTION:
+    Scale the fft output logarithmically.
+    Scales length of original FFT output so that each column entry
+    represents loudness at frequency *bin* at the column index.
+    Each bin is frequency band with logarithmic scaling ( 10 Hz, 100 Hz, ...)
+
+    Returns scaled fft output and an array containing the center of each frequency band.
+    -----------
+    INPUT:
+    fft_out: output of stft applied to each frame of the original signal
+    sr: samplerate of audio signal
+    factor: logarithmic scaling factor
+    """
+    timebins, freqbins = np.shape(fft_out)
 
     # Create an array of length freqbins, where each entry is the upper limit of the frequency band
     # e.g. [ 10hz, 100hz, 1000hz, 10khz, ... ]
@@ -98,47 +125,48 @@ def _logscale_spec(spec, sr=44100, factor=20.):
     scale *= (freqbins-1)/max(scale)
     scale = np.unique(np.round(scale))   
     # create spectrogram with new freq bins
-    newspec = np.complex128(np.zeros([timebins, len(scale)]))
-    # newspec is timebins x scale matrix i.e. with 100 samples and 10 bins it has 100 rows and 10 columns
+    scaled_fft = np.complex128(np.zeros([timebins, len(scale)]))
+    # scaled_fft is a matrix of sample bins x frequency bins
     for i in range(0, len(scale)):
         if i == len(scale)-1:
             # spec[:, scale[i]:scale[i+1]] is the bin-size x timebins matrix
-            # where each column is a list of decibel values at the given timebin (sample) for frequencies inside the bin
+            # where each column is a list of decibel values at the given frame for frequencies inside the bin
             
             # 10 Hz - [ db1, db2, ... ]
             #         .................
             # 1000Hz- [ db1, db2, ... ]
             
             # so the sum of this column is the sum of the values of all frequencies in the given bin for a sample
-            newspec[:,i] = np.sum(spec[:,scale[i]:], axis=1)
+            scaled_fft[:,i] = np.sum(fft_out[:,scale[i]:], axis=1)
         else:        
-            newspec[:,i] = np.sum(spec[:,scale[i]:scale[i+1]], axis=1)
-    
-    # list center freq of bins
-    
+            scaled_fft[:,i] = np.sum(fft_out[:,scale[i]:scale[i+1]], axis=1)
+  
+    # allfreqs = all frequencies represented by fft  
     allfreqs = np.abs(np.fft.fftfreq(freqbins*2, 1./sr)[:freqbins+1])
-    freqs = []
+    freqbin_centers = []
+    # get array of frequencies at center of each bin
     for i in range(0, len(scale)):
         if i == len(scale)-1:
-            freqs += [np.mean(allfreqs[scale[i]:])]
+            freqbin_centers += [np.mean(allfreqs[scale[i]:])]
         else:
-            freqs += [np.mean(allfreqs[scale[i]:scale[i+1]])]
+            freqbin_centers += [np.mean(allfreqs[scale[i]:scale[i+1]])]
     
-    return newspec, freqs
+    return scaled_fft, freqbin_centers
 
 
 def create_fft(audiopath, binsize=2**10):
     samplerate, samples = wav.read(audiopath)
+    # apply real FFT
     rfft_out = _stft(samples, binsize)
 
     # spectrogram with frequency bins scaled logarithmically
-    binned_spectrogram, freq = _logscale_spec(rfft_out, factor=1.0, sr=samplerate)
+    scaled_fft, freqbin_centers = _logscale_spec(rfft_out, factor=1.0, sr=samplerate)
 
-    db_matrix = 20. * np.log10(np.abs(binned_spectrogram)/10e-6)
+    db_matrix = 20. * np.log10(np.abs(scaled_fft)/10e-6)
     timebins, freqbins = np.shape(db_matrix)
 
     src = FFT.Source(samples, samplerate)
-    processed = FFT.Processed(binned_spectrogram, timebins, freqbins, db_matrix, freq)
+    processed = FFT.Processed(scaled_fft, timebins, freqbins, db_matrix, freqbin_centers)
 
     return FFT(src, processed)
 
