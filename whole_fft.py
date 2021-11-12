@@ -48,7 +48,7 @@ def plot_frequency_content(filename):
     p = fft(channel) # p -> power spectrum
 
     nUniquePts = ceil((num_sample_points+1)/2.0)
-    p = p[0:nUniquePts]
+    p = p[0:int(nUniquePts)]
     # fft return contains both magnitude and phase info and is i
     # a complex representation -- taking abs gives us magnitude info
     # of frequency components
