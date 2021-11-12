@@ -89,7 +89,7 @@ def _stft(signal, frame_size, overlap_fac=0.5, window=np.hanning):
     hop_size = int(frame_size - np.floor(overlap_fac * frame_size))
     
     # zeros at beginning (thus center of 1st window should be for sample nr. 0)
-    samples = np.append(np.zeros(np.floor(frame_size/2.0)), signal)    
+    samples = np.append(np.zeros(int(np.floor(frame_size/2.0))), signal)    
     # columns in signal v time matrix that we apply the windowing to
     cols = np.ceil( (len(samples) - frame_size) / float(hop_size)) + 1
     # zeros at end (thus samples can be fully covered by frames)
